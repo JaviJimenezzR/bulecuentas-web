@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Calculadora de Cuentas de Mesas (Múltiple)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Estilos personalizados adicionales */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .loader {
+            border-top-color: #8B5CF6; /* Color morado para el loader */
+            animation: spinner 0.6s linear infinite;
+        }
+        @keyframes spinner {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+        .image-preview-container {
+            width: 100%;
+            max-width: 500px;
+            margin: 0 auto;
+            overflow: hidden;
+        }
+        .image-preview-container img {
+            width: 100%;
+            height: auto;
+            display: block;
+            border-radius: 0.5rem;
+        }
+    </style>
+</head>
+<body class="bg-white text-gray-800 min-h-screen flex flex-col items-center justify-center p-4">
+
+    <div class="bg-gray-50 p-6 sm:p-8 rounded-xl shadow-2xl w-full max-w-2xl">
+        <header class="text-center mb-6 sm:mb-8">
+            <h1 class="text-2xl sm:text-3xl font-bold text-purple-600">Calculadora de Cuentas de Mesas</h1>
+            <p class="text-sm text-gray-600 mt-1">Sube una o varias imágenes con las cuentas y calcularemos el total en euros.</p>
+        </header>
+
+        <main>
+            <div class="mb-6 text-center">
+                <label for="imageUpload" class="bg-black text-purple-400 font-semibold py-3 px-6 rounded-lg cursor-pointer hover:bg-gray-800 transition-colors duration-150 ease-in-out inline-block shadow-md">
+                    Seleccionar Imágenes
+                </label>
+                <input type="file" id="imageUpload" accept="image/*" class="hidden" multiple>
+                <p id="fileName" class="text-xs text-gray-500 mt-2"></p>
+            </div>
+
+            <div id="imagePreviewContainer" class="image-preview-container mb-6 hidden">
+                <img id="imagePreview" src="#" alt="Vista previa de la imagen" class="border border-gray-300 shadow-sm"/>
+            </div>
+
+            <div id="loader" class="flex justify-center items-center my-4 hidden">
+                <div class="loader ease-linear rounded-full border-4 border-t-4 border-gray-200 h-12 w-12"></div>
+                <p class="ml-3 text-gray-600">Procesando imágenes...</p>
+            </div>
+
+            <div id="messageArea" class="text-center text-red-500 my-4 font-medium whitespace-pre-line"></div>
+
+            <div id="resultsArea" class="mt-6 hidden bg-white p-4 sm:p-6 rounded-lg border border-gray-200 shadow">
+                <h2 class="text-xl font-semibold text-purple-600 mb-3">Resultados Globales:</h2>
+                <div class="mb-4">
+                    <h3 class="font-medium text-gray-700">Textos Extraídos (por imagen):</h3>
+                    <pre id="extractedText" class="bg-gray-100 p-3 rounded-md text-xs text-gray-600 max-h-60 overflow-y-auto whitespace-pre-wrap break-words"></pre>
+                </div>
+                <div>
+                    <h3 class="font-medium text-gray-700">Cantidades Encontradas (por imagen):</h3>
+                    <ul id="foundValues" class="text-sm text-gray-600 mb-3 pl-2 max-h-60 overflow-y-auto">
+                        </ul>
+                    <p class="text-xl sm:text-2xl font-bold text-right text-green-600">
+                        Total Calculado (Global): <span id="totalSum">0.00</span> €
+                    </p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const imageUpload = document.getElementById('imageUpload');
+        const fileNameDisplay = document.getElementById('fileName');
+        const imagePreview = document.getElementById('imagePreview');
+        const imagePreviewContainer = document.getElementById('imagePreviewContainer');
+        const loader = document.getElementById('loader');
+        const messageArea = document.getElementById('messageArea');
+        const resultsArea = document.getElementById('resultsArea');
+        const extractedTextDisplay = document.getElementById('extractedText');
+        const totalSumDisplay = document.getElementById('totalSum');
+        const foundValuesList = document.getElementById('foundValues');
+
+        let globalTotalSum = 0;
+
+        // Event listener para la selección de archivos
+        imageUpload.addEventListener('change', async (event) => {
+            const files = event.target.files;
+            if (!files.length) {
+                fileNameDisplay.textContent = 'Ningún archivo seleccionado.';
+                imagePreviewContainer.classList.add('hidden');
+                resultsArea.classList.add('hidden');
+                messageArea.textContent = '';
+                return;
+            }
+
+            // Limpiar resultados y UI antes de procesar nuevos archivos
+            fileNameDisplay.textContent = `${files.length} archivo(s) seleccionado(s).`;
+            messageArea.textContent = ''; 
+            resultsArea.classList.add('hidden'); 
+            loader.classList.remove('hidden');
+            imageUpload.disabled = true; 
+
+            globalTotalSum = 0;
+            totalSumDisplay.textContent = '0.00';
+            foundValuesList.innerHTML = '';
+            extractedTextDisplay.textContent = '';
+            imagePreviewContainer.classList.add('hidden'); 
+
+            // Mostrar vista previa de la primera imagen
+            if (files.length > 0) {
+                const firstFileForPreview = files[0];
+                const readerPreview = new FileReader();
+                readerPreview.onload = (e) => {
+                    imagePreview.src = e.target.result;
+                    imagePreviewContainer.classList.remove('hidden');
+                };
+                readerPreview.onerror = () => {
+                    imagePreviewContainer.classList.add('hidden');
+                    // Acumular mensaje de error si la vista previa falla
+                    messageArea.textContent += `Error al leer la vista previa de ${firstFileForPreview.name}.\n`;
+                };
+                readerPreview.readAsDataURL(firstFileForPreview);
+            }
+
+            const individualResults = [];
+            // Procesar archivos secuencialmente
+            for (const file of Array.from(files)) { // Usar Array.from para iterar sobre FileList
+                const result = await processSingleFile(file); // Esperar a que cada archivo se procese
+                if (result) { // processSingleFile resuelve con null en error de lectura de archivo
+                    individualResults.push(result);
+                }
+            }
+
+            // Procesar los resultados acumulados
+            let allExtractedTextsConcatenated = "";
+            let anySuccessfulExtraction = false;
+
+            individualResults.forEach(result => {
+                if (result.subtotal) { 
+                    globalTotalSum += result.subtotal; 
+                }
+                if (result.subtotal > 0) {
+                     anySuccessfulExtraction = true;
+                }
+                
+                if (result.textForDisplay) {
+                     allExtractedTextsConcatenated += result.textForDisplay + "\n---------------------------------------\n";
+                     // Considerar extracción exitosa si el texto no es claramente un mensaje de error
+                     if (!result.textForDisplay.toLowerCase().includes("error al contactar la api") &&
+                         !result.textForDisplay.toLowerCase().includes("error durante el procesamiento") &&
+                         !result.textForDisplay.toLowerCase().includes("no se pudo extraer texto")) {
+                        anySuccessfulExtraction = true; 
+                     }
+                }
+            });
+
+            totalSumDisplay.textContent = globalTotalSum.toFixed(2).replace('.', ',');
+            extractedTextDisplay.textContent = allExtractedTextsConcatenated.trim() || "No se pudo extraer texto de ninguna imagen o no contenían texto relevante.";
+            
+            if (anySuccessfulExtraction || globalTotalSum > 0) {
+                resultsArea.classList.remove('hidden');
+            } else if (!messageArea.textContent.trim()) { // Si no hay mensajes de error específicos y no hubo éxito
+                messageArea.textContent = "No se encontraron cantidades en euros en las imágenes procesadas o no se pudo extraer texto.";
+            }
+
+            loader.classList.add('hidden');
+            imageUpload.disabled = false; 
+            imageUpload.value = ''; // Permite reseleccionar los mismos archivos
+        });
+
+        async function processSingleFile(file) {
+            return new Promise((resolve) => { 
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    const base64ImageData = e.target.result.split(',')[1];
+                    const userPrompt = "Extrae todo el texto de esta imagen. Presta especial atención a números que parezcan ser cantidades monetarias, usualmente cerca del símbolo € o en formato decimal europeo (ej. 123,45).";
+                    const apiKey = ""; 
+
+                    const payload = {
+                        contents: [{
+                            role: "user",
+                            parts: [
+                                { text: userPrompt },
+                                { inlineData: { mimeType: file.type, data: base64ImageData } }
+                            ]
+                        }],
+                    };
+
+                    try {
+                        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+                        const response = await fetch(apiUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+
+                        if (!response.ok) {
+                            const errorBody = await response.json();
+                            console.error(`Error en API para ${file.name}:`, errorBody);
+                            // Acumular mensaje de error en messageArea
+                            messageArea.textContent += `Error procesando ${file.name}: ${errorBody.error?.message || response.statusText}\n`;
+                            resolve({ subtotal: 0, textForDisplay: `Archivo: ${file.name}\nError al contactar la API: ${errorBody.error?.message || response.statusText}` });
+                            return;
+                        }
+
+                        const result = await response.json();
+
+                        if (result.candidates && result.candidates[0]?.content?.parts?.[0]?.text) {
+                            const text = result.candidates[0].content.parts[0].text;
+                            const { subtotal } = parseTextAndCalculateSubtotalForFile(text, file.name);
+                            resolve({ subtotal: subtotal, textForDisplay: `Archivo: ${file.name}\n\n${text}` });
+                        } else {
+                            console.warn(`Respuesta inesperada de API para ${file.name}:`, result);
+                            let errorMsg = `No se pudo extraer texto de ${file.name}.`;
+                            if (result.promptFeedback && result.promptFeedback.blockReason) {
+                                errorMsg += ` Motivo: ${result.promptFeedback.blockReasonDetail || result.promptFeedback.blockReason}`;
+                            }
+                            messageArea.textContent += errorMsg + "\n"; // Acumular mensaje
+                            resolve({ subtotal: 0, textForDisplay: `Archivo: ${file.name}\n${errorMsg}` });
+                        }
+                    } catch (error) {
+                        console.error(`Excepción al procesar ${file.name}:`, error);
+                        messageArea.textContent += `Error crítico procesando ${file.name}: ${error.message}\n`; // Acumular mensaje
+                        resolve({ subtotal: 0, textForDisplay: `Archivo: ${file.name}\nError durante el procesamiento: ${error.message}` });
+                    }
+                };
+                reader.onerror = (error) => {
+                    console.error(`Error leyendo archivo ${file.name}:`, error);
+                    messageArea.textContent += `Error al leer el archivo ${file.name}.\n`; // Acumular mensaje
+                    resolve(null); // Resuelve con null si la lectura del archivo falla para filtrarlo después
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function parseTextAndCalculateSubtotalForFile(text, fileName) {
+            let imageSubtotal = 0;
+
+            const fileHeader = document.createElement('p');
+            fileHeader.className = 'font-semibold text-sm text-purple-500 mt-3 pt-2 border-t border-gray-200'; 
+            fileHeader.textContent = `Resultados de: ${fileName}`;
+            foundValuesList.appendChild(fileHeader);
+
+            const euroRegex = /(?:€\s*([0-9.,]+(?:[.,]\d{1,2})?))|(([0-9.,]+(?:[.,]\d{1,2})?)\s*€)/gi;
+            let match;
+            const foundNumericStrings = [];
+
+            while ((match = euroRegex.exec(text)) !== null) {
+                const numberString = match[1] || match[2];
+                if (numberString) {
+                    foundNumericStrings.push(numberString.trim());
+                }
+            }
+            
+            if (foundNumericStrings.length === 0) {
+                const genericNumberRegex = /(\d+([.,]\d{1,2}))/g;
+                while ((match = genericNumberRegex.exec(text)) !== null) {
+                    if (match[1] && !foundNumericStrings.includes(match[1].trim())) {
+                        foundNumericStrings.push(match[1].trim());
+                    }
+                }
+            }
+
+            if (foundNumericStrings.length === 0) {
+                const noDataItem = document.createElement('li');
+                noDataItem.className = 'ml-4 text-gray-500';
+                noDataItem.textContent = 'Ninguna cantidad en euros encontrada en este archivo.';
+                foundValuesList.appendChild(noDataItem);
+            } else {
+                foundNumericStrings.forEach(numStr => {
+                    const cleanedValue = cleanAndParseEuroValue(numStr);
+                    if (cleanedValue > 0) {
+                        imageSubtotal += cleanedValue;
+                        const listItem = document.createElement('li');
+                        listItem.className = 'ml-4';
+                        listItem.textContent = `${cleanedValue.toFixed(2).replace('.', ',')} € (extraído de "${numStr}")`;
+                        foundValuesList.appendChild(listItem);
+                    }
+                });
+            }
+            return { subtotal: imageSubtotal };
+        }
+
+        function cleanAndParseEuroValue(valueStr) {
+            if (!valueStr) return 0;
+            let cleanStr = String(valueStr).trim().replace(/€/g, '').trim();
+            const lastCommaIndex = cleanStr.lastIndexOf(',');
+            const lastDotIndex = cleanStr.lastIndexOf('.');
+
+            if (lastCommaIndex > -1 && lastDotIndex > -1) { // Ambos, coma y punto, presentes
+                if (lastCommaIndex > lastDotIndex) { // Formato europeo: 1.234,56
+                    cleanStr = cleanStr.replace(/\./g, '').replace(',', '.');
+                } else { // Formato anglosajón: 1,234.56
+                    cleanStr = cleanStr.replace(/,/g, '');
+                }
+            } else if (lastCommaIndex > -1) { // Solo comas
+                // Asumir que la última coma es decimal si es seguida por 1 o 2 dígitos.
+                // Ejemplo: "123,45" -> "123.45". "1,234" -> "1234". "1,2,3,45" -> "123.45" (si es la última)
+                if (cleanStr.length - lastCommaIndex - 1 <= 2 && cleanStr.length - lastCommaIndex - 1 > 0) {
+                    // Quitar todas las comas excepto la última, que se convierte en punto.
+                    const parts = cleanStr.split(',');
+                    if (parts.length > 1) {
+                        const decimalPart = parts.pop();
+                        cleanStr = parts.join('') + '.' + decimalPart;
+                    } else {
+                         // Solo una coma, ya manejado por la condición de longitud
+                         cleanStr = cleanStr.replace(',', '.');
+                    }
+                } else { // Coma no es decimal (ej. "1,234") o múltiples comas no decimales
+                    cleanStr = cleanStr.replace(/,/g, '');
+                }
+            } else if (lastDotIndex > -1) { // Solo puntos
+                // Asumir que el último punto es decimal si es seguido por 1 o 2 dígitos.
+                // Ejemplo: "123.45" -> "123.45". "1.234" -> "1234".
+                 if (!(cleanStr.length - lastDotIndex - 1 <= 2 && cleanStr.length - lastDotIndex - 1 > 0)) {
+                     // Si no es un formato decimal claro como X.YY, quitar los puntos (asumir que son separadores de miles)
+                     cleanStr = cleanStr.replace(/\./g, '');
+                 }
+                 // Si es X.YY, el punto se mantiene para parseFloat.
+            }
+            const val = parseFloat(cleanStr);
+            return isNaN(val) ? 0 : val;
+        }
+    </script>
+</body>
+</html>
